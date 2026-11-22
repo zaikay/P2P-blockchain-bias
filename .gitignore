@@ -1,0 +1,19 @@
+# Paramètres locaux et secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+
+# Outils locaux
+.*/
+
+# Fichiers temporaires
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+
+# Autres
+*.docx
+*.pdf
