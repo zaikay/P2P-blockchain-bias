@@ -6,16 +6,25 @@ from web3 import Web3
 
 
 def main():
+    # Le script de démarrage enregistre ces deux fichiers pour le test.
+    dossier_local = Path(__file__).resolve().parents[1] / ".biaschain"
+    fichier = dossier_local / "forge/out/EnergyMarket.sol/EnergyMarket.json"
+    fichier_adresse = dossier_local / "market-address.txt"
+    if not fichier.is_file() or not fichier_adresse.is_file():
+        raise SystemExit("Lance d'abord bash scripts/start.sh depuis le dossier du projet.")
+
     # Vérifie qu'Anvil répond sur le réseau local de test.
     w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
     if not w3.is_connected() or w3.eth.chain_id != 31337:
         raise SystemExit("Le réseau Anvil local est introuvable.")
 
     # Le fichier compilé décrit les fonctions que Python peut appeler.
-    fichier = Path("/tmp/biaschain-forge.GycyDb/out/EnergyMarket.sol/EnergyMarket.json")
-    abi = json.loads(fichier.read_text(encoding="utf-8"))["abi"]
-    adresse = Web3.to_checksum_address("0x5fbdb2315678afecb367f032d93f642f64180aa3")
-    contrat = w3.eth.contract(address=adresse, abi=abi)
+    contrat_compile = json.loads(fichier.read_text(encoding="utf-8"))
+    adresse = Web3.to_checksum_address(fichier_adresse.read_text(encoding="utf-8").strip())
+    code_attendu = Web3.to_bytes(hexstr=contrat_compile["deployedBytecode"]["object"])
+    if w3.eth.get_code(adresse) != code_attendu:
+        raise SystemExit("Le contrat est introuvable sur cette chaîne. Relance bash scripts/start.sh.")
+    contrat = w3.eth.contract(address=adresse, abi=contrat_compile["abi"])
 
     # Le premier compte représente le ménage A. Il vend 2 000 Wh à 2 crédits par Wh.
     # Le premier nombre vaut 1 pour une vente.

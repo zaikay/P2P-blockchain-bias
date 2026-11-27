@@ -27,3 +27,11 @@
     alt="BiasChain | Échanges pair à pair d’énergie solaire sur blockchain et biais cognitifs des ménages"
   />
 </p>
+
+## Démarrer BiasChain
+
+Avec Bash et Docker Compose, lance la commande suivante depuis la racine du projet.
+
+```bash
+bash scripts/start.sh
+```
