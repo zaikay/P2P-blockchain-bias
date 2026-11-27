@@ -1,13 +1,21 @@
 import csv
 import json
+import sys
 from pathlib import Path
 
 from web3 import Web3
 
+# Permet de retrouver la classe quand on lance le test depuis son fichier Python.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if __package__ in (None, ""):
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from biaschain.households import Household
+
 
 def load_contract():
     # Le script de démarrage enregistre ces deux fichiers pour le test.
-    local_dir = Path(__file__).resolve().parents[1] / ".biaschain"
+    local_dir = PROJECT_ROOT / ".biaschain"
     artifact_path = local_dir / "forge/out/EnergyMarket.sol/EnergyMarket.json"
     address_path = local_dir / "market-address.txt"
     if not artifact_path.is_file() or not address_path.is_file():
@@ -28,12 +36,21 @@ def load_contract():
     return web3, contract
 
 
-def submit_offer(web3, contract, *, household, household_address, operation, quantity_wh, price_per_wh):
+def load_households(web3, contract, names):
+    # Donne un compte Anvil différent à chaque ménage du test.
+    accounts = web3.eth.accounts[:len(names)]
+    if len({address.lower() for address in accounts}) != len(names):
+        raise SystemExit(f"This test requires {len(names)} distinct Anvil accounts.")
+    return [Household(name, address, contract) for name, address in zip(names, accounts)]
+
+
+def submit_offer(web3, contract, *, household, operation, quantity_wh, price_per_wh):
     # Le contrat utilise 0 pour un achat et 1 pour une vente.
-    side = {"buy": 0, "sell": 1}[operation]
-    transaction_hash = contract.functions.submitOffer(side, quantity_wh, price_per_wh).transact(
-        {"from": household_address}
-    )
+    side, send_offer = {
+        "buy": (0, household.submit_buy_offer),
+        "sell": (1, household.submit_sell_offer),
+    }[operation]
+    transaction_hash = send_offer(quantity_wh, price_per_wh)
 
     # Le reçu indique si l'offre a été enregistrée et combien de gas elle a utilisé.
     receipt = web3.eth.wait_for_transaction_receipt(transaction_hash)
@@ -48,7 +65,7 @@ def submit_offer(web3, contract, *, household, household_address, operation, qua
         block_identifier=block_number
     )
     if (recorded_address.lower(), recorded_side, recorded_quantity, recorded_price) != (
-        household_address.lower(),
+        household.address.lower(),
         side,
         quantity_wh,
         price_per_wh,
@@ -57,11 +74,10 @@ def submit_offer(web3, contract, *, household, household_address, operation, qua
 
     # Compare les soldes à la fin du bloc précédent et à la fin du bloc de l'offre.
     previous_block = block_number - 1
-    household_credits = contract.functions.creditsOf(household_address)
-    credits_before = household_credits.call(block_identifier=previous_block)
-    credits_after = household_credits.call(block_identifier=block_number)
-    eth_before_wei = web3.eth.get_balance(household_address, block_identifier=previous_block)
-    eth_after_wei = web3.eth.get_balance(household_address, block_identifier=block_number)
+    credits_before = household.credit_balance(block_identifier=previous_block)
+    credits_after = household.credit_balance(block_identifier=block_number)
+    eth_before_wei = web3.eth.get_balance(household.address, block_identifier=previous_block)
+    eth_after_wei = web3.eth.get_balance(household.address, block_identifier=block_number)
 
     # Les frais payés sont le gas utilisé multiplié par le prix d'une unité de gas.
     gas_used = receipt["gasUsed"]
@@ -69,8 +85,8 @@ def submit_offer(web3, contract, *, household, household_address, operation, qua
     fee_wei = gas_used * gas_price_wei
     return {
         "operation": operation,
-        "household": household,
-        "household_address": household_address,
+        "household": household.name,
+        "household_address": household.address,
         "offer_id": offer_id,
         "block_number": block_number,
         "quantity_wh": recorded_quantity,
@@ -99,13 +115,13 @@ def append_result(csv_path, result):
 
 def main():
     web3, contract = load_contract()
+    household_a = load_households(web3, contract, ("A",))[0]
 
     # Le premier compte représente le ménage A. Il vend 2 000 Wh à 2 crédits par Wh.
     result = submit_offer(
         web3,
         contract,
-        household="A",
-        household_address=web3.eth.accounts[0],
+        household=household_a,
         operation="sell",
         quantity_wh=2000,
         price_per_wh=2,

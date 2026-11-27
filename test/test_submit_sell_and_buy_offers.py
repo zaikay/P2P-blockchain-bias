@@ -1,37 +1,32 @@
 from pathlib import Path
 from uuid import uuid4
 
-from test_submit_sell_offer import append_result, load_contract, submit_offer
+from test_submit_sell_offer import append_result, load_contract, load_households, submit_offer
 
 
 def main():
     web3, contract = load_contract()
     # Prend les trois premiers comptes Anvil pour les ménages A, B et C.
-    accounts = web3.eth.accounts[:3]
-    if len({account.lower() for account in accounts}) < 3:
-        raise SystemExit("This test requires three distinct Anvil accounts.")
+    household_a, household_b, household_c = load_households(web3, contract, ("A", "B", "C"))
 
     offers = [
         # Le ménage A veut vendre 2 000 Wh à 2 crédits par Wh.
         {
-            "household": "A",
-            "household_address": accounts[0],
+            "household": household_a,
             "operation": "sell",
             "quantity_wh": 2000,
             "price_per_wh": 2,
         },
         # Le ménage B veut acheter 1 000 Wh à 3 crédits par Wh au maximum.
         {
-            "household": "B",
-            "household_address": accounts[1],
+            "household": household_b,
             "operation": "buy",
             "quantity_wh": 1000,
             "price_per_wh": 3,
         },
         # Le ménage C veut acheter 500 Wh à 2 crédits par Wh au maximum.
         {
-            "household": "C",
-            "household_address": accounts[2],
+            "household": household_c,
             "operation": "buy",
             "quantity_wh": 500,
             "price_per_wh": 2,
