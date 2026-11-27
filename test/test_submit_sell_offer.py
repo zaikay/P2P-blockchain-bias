@@ -7,88 +7,88 @@ from web3 import Web3
 
 def main():
     # Le script de démarrage enregistre ces deux fichiers pour le test.
-    dossier_local = Path(__file__).resolve().parents[1] / ".biaschain"
-    fichier = dossier_local / "forge/out/EnergyMarket.sol/EnergyMarket.json"
-    fichier_adresse = dossier_local / "market-address.txt"
-    if not fichier.is_file() or not fichier_adresse.is_file():
-        raise SystemExit("Lance d'abord bash scripts/start.sh depuis le dossier du projet.")
+    local_dir = Path(__file__).resolve().parents[1] / ".biaschain"
+    artifact_path = local_dir / "forge/out/EnergyMarket.sol/EnergyMarket.json"
+    address_path = local_dir / "market-address.txt"
+    if not artifact_path.is_file() or not address_path.is_file():
+        raise SystemExit("Run bash scripts/start.sh from the project root first.")
 
     # Vérifie qu'Anvil répond sur le réseau local de test.
-    w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
-    if not w3.is_connected() or w3.eth.chain_id != 31337:
-        raise SystemExit("Le réseau Anvil local est introuvable.")
+    web3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
+    if not web3.is_connected() or web3.eth.chain_id != 31337:
+        raise SystemExit("The local Anvil network is unavailable.")
 
     # Le fichier compilé décrit les fonctions que Python peut appeler.
-    contrat_compile = json.loads(fichier.read_text(encoding="utf-8"))
-    adresse = Web3.to_checksum_address(fichier_adresse.read_text(encoding="utf-8").strip())
-    code_attendu = Web3.to_bytes(hexstr=contrat_compile["deployedBytecode"]["object"])
-    if w3.eth.get_code(adresse) != code_attendu:
-        raise SystemExit("Le contrat est introuvable sur cette chaîne. Relance bash scripts/start.sh.")
-    contrat = w3.eth.contract(address=adresse, abi=contrat_compile["abi"])
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    address = Web3.to_checksum_address(address_path.read_text(encoding="utf-8").strip())
+    expected_bytecode = Web3.to_bytes(hexstr=artifact["deployedBytecode"]["object"])
+    if web3.eth.get_code(address) != expected_bytecode:
+        raise SystemExit("EnergyMarket is missing on this chain. Run bash scripts/start.sh again.")
+    contract = web3.eth.contract(address=address, abi=artifact["abi"])
 
     # Le premier compte représente le ménage A. Il vend 2 000 Wh à 2 crédits par Wh.
     # Le premier nombre vaut 1 pour une vente.
-    menage_a = w3.eth.accounts[0]
-    transaction = contrat.functions.submitOffer(1, 2000, 2).transact({"from": menage_a})
+    household_address = web3.eth.accounts[0]
+    transaction_hash = contract.functions.submitOffer(1, 2000, 2).transact({"from": household_address})
 
     # Le reçu indique si l'offre a été enregistrée et combien de gas elle a utilisé.
-    recu = w3.eth.wait_for_transaction_receipt(transaction)
-    if recu["status"] != 1:
-        raise SystemExit("L'envoi de l'offre a échoué.")
+    receipt = web3.eth.wait_for_transaction_receipt(transaction_hash)
+    if receipt["status"] != 1:
+        raise SystemExit("Offer submission failed.")
 
     # Récupère le numéro dans le reçu, puis relit l'offre dans le contrat.
-    evenement = contrat.events.OfferSubmitted().process_receipt(recu)[0]
-    numero = evenement["args"]["offerId"]
-    bloc = recu["blockNumber"]
-    _, _, quantite, prix = contrat.functions.offers(numero).call(block_identifier=bloc)
+    event = contract.events.OfferSubmitted().process_receipt(receipt)[0]
+    offer_id = event["args"]["offerId"]
+    block_number = receipt["blockNumber"]
+    _, _, recorded_quantity, recorded_price = contract.functions.offers(offer_id).call(block_identifier=block_number)
 
     # Compare les soldes à la fin du bloc précédent et à la fin du bloc de l'offre.
-    bloc_avant = bloc - 1
-    credits_du_menage = contrat.functions.creditsOf(menage_a)
-    credits_avant = credits_du_menage.call(block_identifier=bloc_avant)
-    credits_apres = credits_du_menage.call(block_identifier=bloc)
-    eth_avant_wei = w3.eth.get_balance(menage_a, block_identifier=bloc_avant)
-    eth_apres_wei = w3.eth.get_balance(menage_a, block_identifier=bloc)
+    previous_block = block_number - 1
+    household_credits = contract.functions.creditsOf(household_address)
+    credits_before = household_credits.call(block_identifier=previous_block)
+    credits_after = household_credits.call(block_identifier=block_number)
+    eth_before_wei = web3.eth.get_balance(household_address, block_identifier=previous_block)
+    eth_after_wei = web3.eth.get_balance(household_address, block_identifier=block_number)
 
     # Les frais payés sont le gas utilisé multiplié par le prix d'une unité de gas.
-    gas_utilise = recu["gasUsed"]
-    prix_gas_wei = recu["effectiveGasPrice"]
-    frais_wei = gas_utilise * prix_gas_wei
-    resultat = {
-        "operation": "vente",
-        "menage": "A",
-        "adresse_menage": menage_a,
-        "numero_offre": numero,
-        "bloc": bloc,
-        "quantite_wh": quantite,
-        "prix_par_wh": prix,
-        "solde_credits_avant": credits_avant,
-        "solde_credits_apres": credits_apres,
-        "solde_eth_avant": format(Web3.from_wei(eth_avant_wei, "ether"), "f"),
-        "solde_eth_apres": format(Web3.from_wei(eth_apres_wei, "ether"), "f"),
-        "gas_utilise": gas_utilise,
-        "prix_gas_wei": prix_gas_wei,
-        "frais_eth": format(Web3.from_wei(frais_wei, "ether"), "f"),
-        "hash_transaction": Web3.to_hex(transaction),
+    gas_used = receipt["gasUsed"]
+    gas_price_wei = receipt["effectiveGasPrice"]
+    fee_wei = gas_used * gas_price_wei
+    result = {
+        "operation": "sell",
+        "household": "A",
+        "household_address": household_address,
+        "offer_id": offer_id,
+        "block_number": block_number,
+        "quantity_wh": recorded_quantity,
+        "price_per_wh": recorded_price,
+        "credits_before": credits_before,
+        "credits_after": credits_after,
+        "eth_balance_before": format(Web3.from_wei(eth_before_wei, "ether"), "f"),
+        "eth_balance_after": format(Web3.from_wei(eth_after_wei, "ether"), "f"),
+        "gas_used": gas_used,
+        "gas_price_wei": gas_price_wei,
+        "fee_eth": format(Web3.from_wei(fee_wei, "ether"), "f"),
+        "transaction_hash": Web3.to_hex(transaction_hash),
     }
 
     # Crée test/results au besoin et ajoute une ligne au CSV à chaque essai réussi.
-    dossier_resultats = Path(__file__).resolve().parent / "results"
-    dossier_resultats.mkdir(exist_ok=True)
-    chemin_csv = dossier_resultats / "submit_sell_offer.csv"
+    results_dir = Path(__file__).resolve().parent / "results"
+    results_dir.mkdir(exist_ok=True)
+    csv_path = results_dir / "submit_sell_offer.csv"
 
-    with chemin_csv.open("a", encoding="utf-8", newline="") as fichier_csv:
-        csv_transactions = csv.DictWriter(fichier_csv, fieldnames=list(resultat))
+    with csv_path.open("a", encoding="utf-8", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=list(result))
         # Écrit les noms des colonnes quand le fichier est vide.
-        if fichier_csv.tell() == 0:
-            csv_transactions.writeheader()
-        csv_transactions.writerow(resultat)
+        if csv_file.tell() == 0:
+            writer.writeheader()
+        writer.writerow(result)
 
-    print(f"Offre n° {numero} enregistrée dans le bloc {bloc}")
-    print(f"Offre relue sur la chaîne — {quantite} Wh à {prix} crédits par Wh")
-    print(f"Gas utilisé — {gas_utilise}")
-    print(f"Frais payés — {resultat['frais_eth']} ETH de test")
-    print(f"Résultat enregistré dans {chemin_csv}")
+    print(f"Offer #{offer_id} recorded in block {block_number}")
+    print(f"Offer read from the chain — {recorded_quantity} Wh at {recorded_price} credits per Wh")
+    print(f"Gas used — {gas_used}")
+    print(f"Fee paid — {result['fee_eth']} test ETH")
+    print(f"Result saved to {csv_path}")
 
 
 if __name__ == "__main__":
